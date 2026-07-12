@@ -42,30 +42,46 @@
 ## State Machines
 
 ### Vehicle FSM
-```
-           ┌────────────────────────────────────┐
-           │                                    ▼
-     [available] ──dispatch──► [on_trip] ──complete/cancel──► [available]
-           │
-           └──maintenance──► [in_shop] ──close maintenance──► [available]
-                                                              (skip if retired)
-
-     Any state ──retire──► [retired]  (terminal — no exit)
+```mermaid
+stateDiagram-v2
+    [*] --> available
+    available --> on_trip : dispatch
+    on_trip --> available : complete / cancel
+    available --> in_shop : maintenance
+    in_shop --> available : close maintenance (unless retired)
+    
+    available --> retired : retire
+    on_trip --> retired : retire
+    in_shop --> retired : retire
+    retired --> [*]
 ```
 
 ### Driver FSM
-```
-     [available] ──dispatch──► [on_trip] ──complete/cancel──► [available]
-         ▲                                                          │
-         │◄──reinstate────── [suspended] ◄──suspend──────────── Any state
-         │
-     [off_duty] ◄──set off duty──► [available]
+```mermaid
+stateDiagram-v2
+    [*] --> available
+    available --> on_trip : dispatch
+    on_trip --> available : complete / cancel
+    
+    available --> off_duty : set off duty
+    off_duty --> available : set available
+    
+    available --> suspended : suspend
+    on_trip --> suspended : suspend
+    off_duty --> suspended : suspend
+    
+    suspended --> available : reinstate
 ```
 
 ### Trip FSM
-```
-     [draft] ──dispatch──► [dispatched] ──complete──► [completed]
-                                      └───cancel───► [cancelled]
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> dispatched : dispatch
+    dispatched --> completed : complete
+    dispatched --> cancelled : cancel
+    completed --> [*]
+    cancelled --> [*]
 ```
 
 ---

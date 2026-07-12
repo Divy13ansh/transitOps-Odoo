@@ -35,40 +35,42 @@
 
 ## 3. High-Level Component Map
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLIENT LAYER                         │
-│              Browser SPA (React / Vite)                     │
-│          Auth Token stored in httpOnly Cookie               │
-└────────────────────────┬────────────────────────────────────┘
-                         │ HTTPS / REST JSON
-┌────────────────────────▼────────────────────────────────────┐
-│                   FastAPI Application                       │
-│   /auth  /vehicles  /drivers  /trips  /maintenance         │
-│   /fuel-logs  /expenses  /dashboard  /reports              │
-│   /fleet/locations  /trips/suggest  /dashboard/briefing    │  ← P1
-│   /chat/ask (P2)   /trips/autopilot/* (P3)                 │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐  │
-│   │          Dependency Injection Layer                  │  │
-│   │   get_db() → get_current_user() → require_roles()   │  │
-│   └─────────────────────────────────────────────────────┘  │
-│                                                             │
-│   ┌─────────────────────────────────────────────────────┐  │
-│   │              Service Layer                           │  │
-│   │  trip_service  maintenance_service  report_service   │  │
-│   │  llm_service (P1) — single wrapper for all AI calls  │  │
-│   └─────────────────────────────────────────────────────┘  │
-└────────────────────────┬────────────────────────────────────┘
-                         │ SQLAlchemy async
-┌────────────────────────▼────────────────────────────────────┐
-│                    PostgreSQL 16                             │
-│  Tables: users, roles, vehicles, drivers, trips,           │
-│          maintenance_logs, fuel_logs, expenses,            │
-│          depots (P1), briefing_cache (P1),                 │
-│          dispatch_suggestions (P1, optional log)           │
-│  Views:  vw_fleet_kpis, vw_vehicle_cost_summary           │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    classDef client fill:#dcfce7,stroke:#166534,stroke-width:2px;
+    classDef api fill:#f5f5f4,stroke:#78716c,stroke-width:2px;
+    classDef db fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px;
+    classDef layer fill:#f8fafc,stroke:#475569,stroke-width:1px,stroke-dasharray: 5 5;
+
+    subgraph ClientLayer ["Client Layer"]
+        SPA["Browser SPA (React / Vite)<br>Auth Token stored in httpOnly Cookie"]
+    end
+    class SPA client;
+
+    subgraph APILayer ["FastAPI Application"]
+        Router["API Routes / Endpoints<br>/auth, /vehicles, /drivers, /trips, /maintenance,<br>/fuel-logs, /expenses, /dashboard, /reports,<br>/fleet/locations, /trips/suggest, /dashboard/briefing,<br>/chat/ask (P2), /trips/autopilot/* (P3)"]
+        
+        subgraph DI ["Dependency Injection Layer"]
+            DI_Funcs["get_db() → get_current_user() → require_roles()"]
+        end
+        class DI layer;
+
+        subgraph Service ["Service Layer"]
+            Services["trip_service<br>maintenance_service<br>report_service<br>llm_service (P1)"]
+        end
+        class Service layer;
+    end
+    class Router,DI_Funcs,Services api;
+
+    subgraph DataLayer ["Data Layer (PostgreSQL 16)"]
+        DB[("PostgreSQL Database<br><br>Tables:<br>users, roles, vehicles, drivers, trips,<br>maintenance_logs, fuel_logs, expenses,<br>depots (P1), briefing_cache (P1),<br>dispatch_suggestions (P1)<br><br>Views:<br>vw_fleet_kpis, vw_vehicle_cost_summary")]
+    end
+    class DB db;
+
+    SPA -- "HTTPS / REST JSON" --> Router
+    Router --> DI_Funcs
+    DI_Funcs --> Services
+    Services -- "SQLAlchemy async" --> DB
 ```
 
 ---
