@@ -10,7 +10,8 @@ from app.api.v1 import (
     dashboard,
     chat,
     autopilot,
-    reports
+    reports,
+    fleet
 )
 
 api_router = APIRouter()
@@ -29,3 +30,4 @@ api_router.include_router(dashboard.router)
 api_router.include_router(chat.router)
 api_router.include_router(autopilot.router)
 api_router.include_router(reports.router)
+api_router.include_router(fleet.router)

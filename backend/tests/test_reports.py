@@ -208,18 +208,24 @@ async def test_operational_cost_zero_when_no_records(client: AsyncClient, financ
 
 @pytest.mark.anyio
 async def test_operational_cost_sums_correctly(client: AsyncClient, financial_analyst_headers: dict, vehicle: Vehicle, db: AsyncSession):
-    # Seed one fuel log using raw SQL to bypass ORM GeneratedAlwaysError.
-    # Seed exactly one fuel log and one maintenance log to prevent Cartesian product duplication in the view.
-    await insert_fuel_log(db=db, vehicle_id=vehicle.id, trip_id=None, liters=20.00, cost_per_liter=2.50)
+    # Seed two fuel logs using raw SQL to bypass ORM GeneratedAlwaysError.
+    await insert_fuel_log(db=db, vehicle_id=vehicle.id, trip_id=None, liters=20.00, cost_per_liter=2.50)  # 50.0
+    await insert_fuel_log(db=db, vehicle_id=vehicle.id, trip_id=None, liters=10.00, cost_per_liter=3.00)  # 30.0
 
-    # Seed one maintenance log
-    ml = MaintenanceLog(
+    # Seed two maintenance logs
+    ml1 = MaintenanceLog(
         vehicle_id=vehicle.id,
         type="Oil Change",
         cost=Decimal("150.00"),
         status=MaintenanceStatus.closed
     )
-    db.add(ml)
+    ml2 = MaintenanceLog(
+        vehicle_id=vehicle.id,
+        type="Tire Replacement",
+        cost=Decimal("100.00"),
+        status=MaintenanceStatus.closed
+    )
+    db.add_all([ml1, ml2])
     await db.commit()
 
     response = await client.get("/api/v1/reports/operational-cost", headers=financial_analyst_headers)
@@ -227,9 +233,9 @@ async def test_operational_cost_sums_correctly(client: AsyncClient, financial_an
     data = response.json()
     item = next((x for x in data if x["vehicle_id"] == str(vehicle.id)), None)
     assert item is not None
-    assert item["total_fuel_cost"] == 50.0
-    assert item["total_maintenance_cost"] == 150.0
-    assert item["total_operational_cost"] == 200.0
+    assert item["total_fuel_cost"] == 80.0
+    assert item["total_maintenance_cost"] == 250.0
+    assert item["total_operational_cost"] == 330.0
 
 
 @pytest.mark.anyio

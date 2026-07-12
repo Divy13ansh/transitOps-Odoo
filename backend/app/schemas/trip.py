@@ -64,3 +64,25 @@ class TripListResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+class TripSuggestRequest(BaseModel):
+    source: str = Field(..., min_length=1, max_length=200)
+    destination: str = Field(..., min_length=1, max_length=200)
+    cargo_weight_kg: float = Field(..., gt=0)
+    planned_distance_km: float = Field(..., gt=0)
+
+
+class TripSuggestionItem(BaseModel):
+    rank: int
+    vehicle_id: UUID
+    vehicle_name: str
+    driver_id: UUID
+    driver_name: str
+    reason: str
+
+
+class TripSuggestResponse(BaseModel):
+    suggestions: list[TripSuggestionItem]
+    excluded: str
+

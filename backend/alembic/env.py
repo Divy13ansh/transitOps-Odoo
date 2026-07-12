@@ -23,7 +23,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # Convert async database URL to sync for Alembic (e.g. postgresql+asyncpg -> postgresql)
-sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "")
+sync_db_url = settings.DATABASE_URL.replace("+asyncpg", "").replace("ssl=require", "sslmode=require")
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""

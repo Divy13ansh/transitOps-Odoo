@@ -228,3 +228,68 @@ async def cancel_trip(db: AsyncSession, trip_id: UUID, data: TripCancelRequest) 
     await _commit_or_rollback(db)
     await db.refresh(trip)
     return trip
+
+
+async def get_eligible_candidates(
+    cargo_weight_kg: float,
+    planned_distance_km: float,
+    db: AsyncSession,
+) -> dict:
+    """
+    Filters vehicles (status = available, capacity >= cargo_weight_kg) and
+    drivers (status = available, license not expired, not suspended/off_duty)
+    to build eligible dispatch pairs.
+    """
+    # Fetch all active vehicles (not retired)
+    vehicles_result = await db.execute(
+        select(Vehicle).where(Vehicle.status != VehicleStatus.retired)
+    )
+    all_vehicles = vehicles_result.scalars().all()
+
+    # Fetch all drivers (not suspended)
+    drivers_result = await db.execute(
+        select(Driver).where(Driver.status != DriverStatus.suspended)
+    )
+    all_drivers = drivers_result.scalars().all()
+
+    today = date.today()
+
+    eligible_vehicles = []
+    excluded_vehicles = []
+    for v in all_vehicles:
+        if v.status != VehicleStatus.available:
+            excluded_vehicles.append(f"{v.name} ({v.registration_number}) excluded — status is {v.status.value}")
+        elif float(v.max_load_kg) < cargo_weight_kg:
+            excluded_vehicles.append(f"{v.name} ({v.registration_number}) excluded — capacity {float(v.max_load_kg)}kg is less than cargo weight {cargo_weight_kg}kg")
+        else:
+            eligible_vehicles.append(v)
+
+    eligible_drivers = []
+    excluded_drivers = []
+    for d in all_drivers:
+        if d.status != DriverStatus.available:
+            excluded_drivers.append(f"{d.full_name} excluded — status is {d.status.value}")
+        elif d.license_expiry < today:
+            excluded_drivers.append(f"{d.full_name} excluded — license expired on {d.license_expiry}")
+        else:
+            eligible_drivers.append(d)
+
+    candidates = []
+    for v in eligible_vehicles:
+        for d in eligible_drivers:
+            candidates.append({
+                "vehicle_id": str(v.id),
+                "vehicle_name": v.name,
+                "vehicle_max_load_kg": float(v.max_load_kg),
+                "driver_id": str(d.id),
+                "driver_name": d.full_name,
+                "driver_safety_score": float(d.safety_score),
+            })
+
+    excluded_reasons = excluded_vehicles + excluded_drivers
+    excluded_text = ". ".join(excluded_reasons) if excluded_reasons else "None."
+
+    return {
+        "candidates": candidates,
+        "excluded": excluded_text
+    }
