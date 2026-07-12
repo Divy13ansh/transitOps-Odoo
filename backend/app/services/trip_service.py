@@ -1,118 +1,230 @@
+from datetime import date, datetime, timezone
+from typing import Optional
 from uuid import UUID
-from datetime import date
+from decimal import Decimal
+
 from fastapi import HTTPException
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.vehicle import Vehicle, VehicleStatus
-from app.models.driver import Driver, DriverStatus
-from app.models.trip import Trip, TripStatus
+from app.models.driver import Driver
+from app.models.trip import Trip
+from app.models.vehicle import Vehicle
+from app.models.enums import VehicleStatus, DriverStatus, TripStatus
+from app.schemas.trip import TripCancelRequest, TripCompleteRequest, TripCreate, TripUpdate
 
 
-async def validate_trip_creation(
-    vehicle_id: UUID,
-    driver_id: UUID,
-    cargo_weight_kg: float,
-    db: AsyncSession,
-) -> tuple[Vehicle, Driver]:
-    vehicle = await db.get(Vehicle, vehicle_id)
+async def _get_trip_or_404(db: AsyncSession, trip_id: UUID) -> Trip:
+    result = await db.execute(select(Trip).where(Trip.id == trip_id))
+    trip = result.scalar_one_or_none()
+    if trip is None:
+        raise HTTPException(status_code=404, detail=f"Trip {trip_id} not found")
+    return trip
+
+
+async def _get_vehicle_or_404(db: AsyncSession, vehicle_id: UUID) -> Vehicle:
+    result = await db.execute(select(Vehicle).where(Vehicle.id == vehicle_id))
+    vehicle = result.scalar_one_or_none()
     if vehicle is None:
-        raise HTTPException(status_code=404, detail="Vehicle not found")
+        raise HTTPException(status_code=404, detail=f"Vehicle {vehicle_id} not found")
+    return vehicle
 
-    driver = await db.get(Driver, driver_id)
+
+async def _get_driver_or_404(db: AsyncSession, driver_id: UUID) -> Driver:
+    result = await db.execute(select(Driver).where(Driver.id == driver_id))
+    driver = result.scalar_one_or_none()
     if driver is None:
-        raise HTTPException(status_code=404, detail="Driver not found")
+        raise HTTPException(status_code=404, detail=f"Driver {driver_id} not found")
+    return driver
 
-    # BR-02: Vehicle must be available
+
+async def _commit_or_rollback(db: AsyncSession) -> None:
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise
+
+
+async def create_trip(db: AsyncSession, trip_data: TripCreate, created_by: UUID) -> Trip:
+    vehicle = await _get_vehicle_or_404(db, trip_data.vehicle_id)
+    await _get_driver_or_404(db, trip_data.driver_id)
+
+    max_load = float(vehicle.max_load_kg)
+    if trip_data.cargo_weight_kg > max_load:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cargo {trip_data.cargo_weight_kg} kg exceeds vehicle max capacity {max_load} kg",
+        )
+
+    trip = Trip(
+        vehicle_id=trip_data.vehicle_id,
+        driver_id=trip_data.driver_id,
+        source=trip_data.source,
+        destination=trip_data.destination,
+        planned_distance_km=Decimal(str(trip_data.planned_distance_km)),
+        cargo_weight_kg=Decimal(str(trip_data.cargo_weight_kg)),
+        revenue=Decimal(str(trip_data.revenue)),
+        notes=trip_data.notes,
+        status=TripStatus.draft,
+        created_by=created_by,
+    )
+    db.add(trip)
+    await _commit_or_rollback(db)
+    await db.refresh(trip)
+    return trip
+
+
+async def get_trip(db: AsyncSession, trip_id: UUID) -> Trip:
+    return await _get_trip_or_404(db, trip_id)
+
+
+async def list_trips(
+    db: AsyncSession,
+    status: Optional[str] = None,
+    vehicle_id: Optional[UUID] = None,
+    driver_id: Optional[UUID] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Trip], int]:
+    query = select(Trip)
+    count_query = select(func.count()).select_from(Trip)
+
+    if status is not None:
+        trip_status_val = TripStatus(status)
+        query = query.where(Trip.status == trip_status_val)
+        count_query = count_query.where(Trip.status == trip_status_val)
+    if vehicle_id is not None:
+        query = query.where(Trip.vehicle_id == vehicle_id)
+        count_query = count_query.where(Trip.vehicle_id == vehicle_id)
+    if driver_id is not None:
+        query = query.where(Trip.driver_id == driver_id)
+        count_query = count_query.where(Trip.driver_id == driver_id)
+
+    total = (await db.execute(count_query)).scalar_one()
+
+    query = query.order_by(Trip.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+    trips = (await db.execute(query)).scalars().all()
+    return list(trips), total
+
+
+async def update_trip_draft(db: AsyncSession, trip_id: UUID, trip_data: TripUpdate) -> Trip:
+    trip = await _get_trip_or_404(db, trip_id)
+    if trip.status != TripStatus.draft:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Trip can only be updated while in draft status (current status: {trip.status.value})",
+        )
+
+    update_fields = trip_data.model_dump(exclude_unset=True)
+
+    if "driver_id" in update_fields:
+        await _get_driver_or_404(db, update_fields["driver_id"])
+
+    if "vehicle_id" in update_fields or "cargo_weight_kg" in update_fields:
+        target_vehicle_id = update_fields.get("vehicle_id", trip.vehicle_id)
+        target_cargo = update_fields.get("cargo_weight_kg", float(trip.cargo_weight_kg))
+        vehicle = await _get_vehicle_or_404(db, target_vehicle_id)
+        max_load = float(vehicle.max_load_kg)
+        if target_cargo > max_load:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cargo {target_cargo} kg exceeds vehicle max capacity {max_load} kg",
+            )
+
+    for field, value in update_fields.items():
+        if field in ("planned_distance_km", "cargo_weight_kg", "revenue") and value is not None:
+            setattr(trip, field, Decimal(str(value)))
+        else:
+            setattr(trip, field, value)
+
+    await _commit_or_rollback(db)
+    await db.refresh(trip)
+    return trip
+
+
+async def dispatch_trip(db: AsyncSession, trip_id: UUID) -> Trip:
+    trip = await _get_trip_or_404(db, trip_id)
+    if trip.status != TripStatus.draft:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Trip must be in draft status to dispatch (current status: {trip.status.value})",
+        )
+
+    vehicle = await _get_vehicle_or_404(db, trip.vehicle_id)
+    driver = await _get_driver_or_404(db, trip.driver_id)
+
     if vehicle.status != VehicleStatus.available:
         raise HTTPException(
             status_code=400,
             detail=f"Vehicle {vehicle.registration_number} is not available for dispatch (current status: {vehicle.status.value})",
         )
 
-    # BR-03: Driver must be available
     if driver.status != DriverStatus.available:
         raise HTTPException(
             status_code=400,
             detail=f"Driver {driver.full_name} cannot be assigned (current status: {driver.status.value})",
         )
 
-    # BR-04: Driver license must not be expired
     if driver.license_expiry < date.today():
         raise HTTPException(
             status_code=400,
             detail=f"Driver {driver.full_name} license expired on {driver.license_expiry}",
         )
 
-    # BR-05: Cargo weight <= vehicle max load
-    if cargo_weight_kg > float(vehicle.max_load_kg):
+    now = datetime.now(timezone.utc)
+    trip.status = TripStatus.dispatched
+    trip.dispatched_at = now
+    vehicle.status = VehicleStatus.on_trip
+    driver.status = DriverStatus.on_trip
+
+    await _commit_or_rollback(db)
+    await db.refresh(trip)
+    return trip
+
+
+async def complete_trip(db: AsyncSession, trip_id: UUID, data: TripCompleteRequest) -> Trip:
+    trip = await _get_trip_or_404(db, trip_id)
+    if trip.status != TripStatus.dispatched:
         raise HTTPException(
             status_code=400,
-            detail=f"Cargo {cargo_weight_kg} kg exceeds vehicle max capacity {vehicle.max_load_kg} kg",
+            detail=f"Trip must be dispatched to complete (current status: {trip.status.value})",
         )
 
-    return vehicle, driver
+    vehicle = await _get_vehicle_or_404(db, trip.vehicle_id)
+    driver = await _get_driver_or_404(db, trip.driver_id)
+
+    now = datetime.now(timezone.utc)
+    trip.status = TripStatus.completed
+    trip.completed_at = now
+    trip.actual_distance_km = Decimal(str(data.actual_distance_km))
+    vehicle.odometer_km = Decimal(str(data.final_odometer_km))
+    vehicle.status = VehicleStatus.available
+    driver.status = DriverStatus.available
+
+    await _commit_or_rollback(db)
+    await db.refresh(trip)
+    return trip
 
 
-async def get_eligible_candidates(
-    cargo_weight_kg: float,
-    planned_distance_km: float,
-    db: AsyncSession,
-) -> dict:
-    vehicles_result = await db.execute(
-        select(Vehicle).where(Vehicle.status == VehicleStatus.available)
-    )
-    available_vehicles = vehicles_result.scalars().all()
-
-    drivers_result = await db.execute(
-        select(Driver).where(
-            Driver.status == DriverStatus.available,
-            Driver.license_expiry >= date.today(),
+async def cancel_trip(db: AsyncSession, trip_id: UUID, data: TripCancelRequest) -> Trip:
+    trip = await _get_trip_or_404(db, trip_id)
+    if trip.status != TripStatus.dispatched:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Trip must be dispatched to cancel (current status: {trip.status.value})",
         )
-    )
-    eligible_drivers = drivers_result.scalars().all()
 
-    eligible_vehicles = [
-        v for v in available_vehicles
-        if float(v.max_load_kg) >= cargo_weight_kg
-    ]
+    vehicle = await _get_vehicle_or_404(db, trip.vehicle_id)
+    driver = await _get_driver_or_404(db, trip.driver_id)
 
-    excluded_vehicles = [
-        v for v in available_vehicles
-        if float(v.max_load_kg) < cargo_weight_kg
-    ]
+    now = datetime.now(timezone.utc)
+    trip.status = TripStatus.cancelled
+    trip.cancelled_at = now
+    trip.notes = f"{trip.notes or ''}\n[Cancelled] {data.reason}".strip()
+    vehicle.status = VehicleStatus.available
+    driver.status = DriverStatus.available
 
-    all_vehicles_result = await db.execute(select(Vehicle))
-    all_vehicles = {v.id: v for v in all_vehicles_result.scalars().all()}
-
-    all_drivers_result = await db.execute(select(Driver))
-    all_drivers = {d.id: d for d in all_drivers_result.scalars().all()}
-
-    excluded_parts = []
-    for v in excluded_vehicles:
-        excluded_parts.append(f"{v.name} excluded — max load {v.max_load_kg} kg < {cargo_weight_kg} kg required")
-    busy_drivers = await db.execute(
-        select(Driver).where(Driver.status == DriverStatus.on_trip)
-    )
-    for d in busy_drivers.scalars().all():
-        excluded_parts.append(f"{d.full_name} excluded — currently on trip")
-
-    candidates = []
-    for v in eligible_vehicles:
-        for d in eligible_drivers:
-            candidates.append({
-                "vehicle_id": str(v.id),
-                "vehicle_name": v.name,
-                "driver_id": str(d.id),
-                "driver_name": d.full_name,
-                "vehicle_max_load_kg": float(v.max_load_kg),
-                "driver_safety_score": float(d.safety_score),
-                "driver_license_expiry": str(d.license_expiry),
-            })
-
-    return {
-        "candidates": candidates,
-        "excluded": "; ".join(excluded_parts) if excluded_parts else None,
-        "all_vehicles": {str(k): {"name": v.name, "status": v.status.value} for k, v in all_vehicles.items()},
-        "all_drivers": {str(k): {"name": d.full_name, "status": d.status.value} for k, d in all_drivers.items()},
-    }
+    await _commit_or_rollback(db)
+    await db.refresh(trip)
+    return trip
