@@ -2,25 +2,19 @@
 
 ## Entity Relationship Overview
 
-```
-# Core (P0)
-users ──< trips
-roles >── users
-
-vehicles ──< trips
-vehicles ──< maintenance_logs
-vehicles ──< fuel_logs
-vehicles ──< expenses
-
-drivers ──< trips
-
-trips ──< fuel_logs
-trips ──< expenses
-
-# P1 additions
-vehicles.depot_id ──> depots
-trips ──< dispatch_suggestions  (optional AI suggestion log)
-dashboard_briefings                 (standalone cache table)
+```mermaid
+erDiagram
+    users ||--o{ trips : "creates"
+    roles ||--o{ users : "defines"
+    vehicles ||--o{ trips : "assigned to"
+    vehicles ||--o{ maintenance_logs : "undergoes"
+    vehicles ||--o{ fuel_logs : "logs fuel for"
+    vehicles ||--o{ expenses : "incurs"
+    drivers ||--o{ trips : "drives"
+    trips ||--o{ fuel_logs : "logs fuel during"
+    trips ||--o{ expenses : "logs expenses during"
+    depots ||--o{ vehicles : "homes"
+    trips ||--o{ dispatch_suggestions : "logs suggestions for"
 ```
 
 ---

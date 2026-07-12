@@ -11,17 +11,31 @@ from app.models.expense import Expense
 from app.models.briefing_cache import BriefingCache
 from app.models.dispatch_suggestion import DispatchSuggestion
 
+# Expose enums at the package level for teammate's router/service compatibility
+from app.models.enums import (
+    VehicleStatus,
+    DriverStatus,
+    TripStatus,
+    MaintenanceStatus,
+    ExpenseCategory
+)
+
 __all__ = [
     "Base",
     "Role",
     "User",
     "Depot",
     "Vehicle",
+    "VehicleStatus",
     "Driver",
+    "DriverStatus",
     "Trip",
+    "TripStatus",
     "MaintenanceLog",
+    "MaintenanceStatus",
     "FuelLog",
     "Expense",
+    "ExpenseCategory",
     "BriefingCache",
     "DispatchSuggestion",
 ]

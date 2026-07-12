@@ -39,14 +39,22 @@ open http://localhost:8000/docs
 
 ## Architecture Summary
 
-```
-FastAPI (Python 3.12) → PostgreSQL 16
-        ↑
-  JWT Auth + RBAC (4 roles)
-  GenAI: llm_service → AI Dispatch Advisor + AI Daily Briefing
-  Fleet Map: react-leaflet + OpenStreetMap + static depot lat/lng
-        ↑
-  React/Vite SPA (mockup-driven, FE TBD)
+```mermaid
+graph TD
+    classDef client fill:#dcfce7,stroke:#166534,stroke-width:2px;
+    classDef api fill:#f5f5f4,stroke:#78716c,stroke-width:2px;
+    classDef db fill:#eff6ff,stroke:#1d4ed8,stroke-width:2px;
+
+    SPA["React/Vite SPA (FE TBD)<br>(Mockup-driven)"]:::client
+    API["FastAPI Backend (Python 3.12)<br>(JWT Auth + RBAC 4 roles)"]:::api
+    GenAI["llm_service<br>(AI Advisor & Daily Briefing)"]:::api
+    Map["Fleet Map<br>(react-leaflet + OSM)"]:::api
+    DB[("PostgreSQL 16 DB")]:::db
+
+    SPA --> API
+    API <--> GenAI
+    API <--> Map
+    API --> DB
 ```
 
 **8 core + 3 P1 DB entities** · **12 enforced business rules** · **3 PostgreSQL views** · **P0–P3 endpoint tiers**
