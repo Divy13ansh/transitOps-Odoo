@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: Remix: Logistics Signup",
+  "description": "A highly polished, responsive signup page for logistics and travel operations featuring role selection, remember me, and a light/dark theme toggle.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
