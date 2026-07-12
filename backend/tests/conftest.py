@@ -67,18 +67,31 @@ async def _track_cleanup():
         v.clear()
     yield
     async with _test_session_factory() as session:
+        vehicle_ids = list(_created_ids["vehicles"])
+        driver_ids = list(_created_ids["drivers"])
+
         for log_id in _created_ids["fuel_logs"]:
             await session.execute(delete(FuelLog).where(FuelLog.id == log_id))
+        for vid in vehicle_ids:
+            await session.execute(delete(FuelLog).where(FuelLog.vehicle_id == vid))
         for log_id in _created_ids["expenses"]:
             await session.execute(delete(Expense).where(Expense.id == log_id))
+        for vid in vehicle_ids:
+            await session.execute(delete(Expense).where(Expense.vehicle_id == vid))
         for log_id in _created_ids["maintenance_logs"]:
             await session.execute(delete(MaintenanceLog).where(MaintenanceLog.id == log_id))
+        for vid in vehicle_ids:
+            await session.execute(delete(MaintenanceLog).where(MaintenanceLog.vehicle_id == vid))
         for log_id in _created_ids["trips"]:
             await session.execute(delete(Trip).where(Trip.id == log_id))
+        for vid in vehicle_ids:
+            await session.execute(delete(Trip).where(Trip.vehicle_id == vid))
+        for did in driver_ids:
+            await session.execute(delete(Trip).where(Trip.driver_id == did))
         for log_id in _created_ids["vehicles"]:
             await session.execute(delete(Vehicle).where(Vehicle.id == log_id))
-        for log_id in _created_ids["drivers"]:
-            await session.execute(delete(Driver).where(Driver.id == log_id))
+        for did in driver_ids:
+            await session.execute(delete(Driver).where(Driver.id == did))
         for log_id in _created_ids["users"]:
             await session.execute(delete(User).where(User.id == log_id))
         for cache_id in _created_ids["briefing_cache"]:
